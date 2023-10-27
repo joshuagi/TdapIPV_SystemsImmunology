@@ -1,0 +1,989 @@
+---
+title: "Manuscript figures"
+author: "Joshua Gillard"
+output:
+  html_document:
+    df_print: paged
+    toc: TRUE
+    theme: united
+    code_folding: show
+date: "October 2023"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+library(gridExtra)
+library(stringr)
+library(rtracklayer)
+library(data.table)
+library(tibble)
+library(plyr)
+library(dplyr)
+library(readxl)
+library(biomaRt)
+library(scales)
+library(ggthemes)
+library(clusterProfiler)
+library(purrr)
+library(GGally)
+library(RColorBrewer)
+library(DESeq2)
+library(clusterProfiler)
+library(openxlsx)
+library(edgeR)
+library(magrittr)
+library(ggpubr)
+library(car)
+library(tidyr)
+library(lemon)
+
+# Operator for filtering
+`%out%` <- function(a,b) ! a %in% b
+
+
+
+```
+
+```{r Figure 1C, echo = FALSE, message = FALSE, warning = FALSE}
+antibodyLFC <- read.xlsx("/Users/jgillard/Desktop/Source_data.xlsx", sheet = 2)
+
+compare_D28_Y1_LFCs = antibodyLFC %>%
+  dplyr::filter(Measure %out% c("Polio.I", "Polio.II", "Polio.III")) %>%
+  droplevels() %>%
+  mutate(split = interaction(Measure, cohort)) %>%
+  split(.$split) %>%
+  purrr::map(., function(x){
+    res.tmp <- data.frame(y.position = max(c(x$LFC.D28, x$LFC.Y1)) * 1.08,
+                          p.value = wilcox.test(x$LFC.D28, x$LFC.Y1, paired = T)$p.value, #wilcox.test
+                          Measure = unique(x$Measure),
+                          cohort = unique(x$cohort)) %>%
+      mutate(group1 = paste0("LFC.D28.", Measure),
+             group2 = paste0("LFC.Y1.", Measure),
+             stars = cut(p.value, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", "ns")))
+  }) %>%
+  bind_rows() %>%
+  mutate(Measure = factor(Measure, levels = c("Prn", "PT", "FHA", "Dt", "TT")))
+
+
+Figure1C <- antibodyLFC %>%
+  dplyr::filter(Measure %out% c("Polio.I", "Polio.II", "Polio.III")) %>%
+  melt(id.vars = c("Subject", "Measure",  "Sex", "Age", "Background", "cohort"), variable.name = "Timepoint") %>%
+  mutate(Measure = factor(Measure, levels = c("Prn", "PT", "FHA", "Dt", "TT"))) %>%
+  mutate(U = interaction(Timepoint, Measure)) %>%
+  mutate(Background = factor(Background, levels = c("aP", "wP", "no data"))) %>%
+  ggplot(aes(y = value, x = U)) +
+  geom_boxplot(outlier.shape = NA,  lwd = 0.25) +
+  geom_line(aes(group = interaction(Subject, Measure)), alpha = 0.25, size = 0.25) +
+  geom_point(aes(fill = Sex, shape = Background), size = 0.75, stroke = 0.1) +
+  theme_bw() +
+  scale_shape_manual(values = c(21, 22, 23)) +
+  scale_fill_manual(values = c("#000000", "grey")) +
+  scale_colour_manual(values = c("#000000", "grey")) +
+  labs(y = "log10 fold change over baseline",
+       x = "") +
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 6.5),
+        axis.text.x = element_text(angle = 45, size = 6.5, vjust = 1, hjust = 1),
+        axis.text.y = element_text(size = 6.5),
+        plot.title = element_text(size = 6.5),
+        legend.text = element_text(size = 6.5),
+        legend.title = element_text(size = 6.5),
+        strip.text.x = element_text(size = 6.5),
+        strip.background = element_rect(colour="white", fill="white"),
+        strip.text.y.right = element_text(angle = 0, hjust = 0),
+        panel.grid.major.x = element_blank(), legend.position = "bottom") +
+  scale_x_discrete(labels = c("Day 28", "Year 1")) +
+  facet_rep_grid(cohort~Measure, scales = "free_x", repeat.tick.labels = TRUE) +
+  #guides(colour = F) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  stat_pvalue_manual(data = compare_D28_Y1_LFCs, label = "stars", tip.length = 0, size = 9 / (14/5))
+Figure1C
+
+
+```
+
+
+```{r Figure S1, echo = FALSE, message = FALSE, warning  = FALSE, eval = TRUE}
+antibodyRAW <- read.xlsx("/Users/jgillard/Desktop/Source_data.xlsx", sheet = 3)
+
+pvals <-  antibodyRAW %>%
+  pivot_longer(cols = c("D0", "D28", "Y1"), names_to = "Timepoint") %>%
+  mutate(split = interaction(Measure, cohort)) %>%
+  droplevels() %>%
+  split(.$split) %>%
+  purrr::map(., function(.x) {
+    
+    .x <- .x %>%
+      na.omit() %>%
+      droplevels()
+    res.tmp <- compare_means(data = .x, value ~ Timepoint, method = "wilcox.test", paired = T) %>%
+      mutate(y.position = max(.x$value, na.rm = T) * 1.05) %>%
+      mutate(stars = cut(p, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", "ns"))) %>%
+      mutate(cohort = unique(.x$cohort),
+             Measure = unique(.x$Measure))
+    
+    return(res.tmp)
+    
+  }) %>%
+  bind_rows()
+
+
+
+
+Tdap_antigens_plot <- antibodyRAW %>%
+  pivot_longer(cols = c("D0", "D28", "Y1"), names_to = "Timepoint") %>%
+  dplyr::filter(Measure %out% c("Polio.I", "Polio.II", "Polio.III")) %>%
+  droplevels() %>%
+  split(.$Measure) %>%
+  purrr::map(., function(.x) {
+    
+    #.x <- test$PT
+    
+    pvals.tmp <- pvals %>%
+      dplyr::filter(Measure == as.character(unique(.x$Measure))) %>%
+      mutate(y.position = y.position*c(1, 1.1, 1.2, 
+                                       1, 1.1, 1.2)) %>%
+      mutate(group1 = interaction(group1, cohort),
+             group2 = interaction(group2, cohort))
+    
+    plot.tmp <-  .x %>%
+      mutate(U = interaction(Timepoint, cohort)) %>%
+      arrange(cohort, Timepoint) %>%
+      mutate(U = factor(U, levels = unique(.$U))) %>%
+      mutate(split = interaction(Measure)) %>%
+      ggplot(aes(x = U, y = 10^value)) +
+      geom_violin(width = 1, aes(col = cohort)) +
+      geom_line(aes(group = Subject), size = 0.3, alpha = 0.25) +
+      geom_point(size = 0.5, shape = 21) +
+      scale_y_continuous(trans = "log10") + # Requires log transform
+      theme_bw() +
+      labs(x = "", y = "IgG (IU/ml)", title = unique(.x$Measure)) +
+      scale_x_discrete(labels = rep(c("Day 0", "Day 28", "Year 1"),2)) +
+      theme(axis.title.x = element_blank(),
+            axis.title.y = element_text(size = 6.5),
+            axis.text.x = element_text(angle = 45, size = 6.5, vjust = 1, hjust = 1),
+            axis.text.y = element_text(size = 6.5),
+            plot.title = element_text(size = 5),
+            legend.text = element_text(size = 6.5),
+            legend.title = element_text(size = 6.5),
+            strip.text.x = element_text(size = 6.5))+
+      #facet_wrap(.~Measure, scales = "free") +
+      stat_pvalue_manual(data = pvals.tmp, label = "stars", tip.length = 0, size = 6.5 / (14/5))
+    return(plot.tmp)
+    
+  })
+Tdap_antigens_plot
+
+
+IPV_antigens_plot <- antibodyRAW %>%
+  pivot_longer(cols = c("D0", "D28", "Y1"), names_to = "Timepoint") %>%
+  dplyr::filter(Measure %in% c("Polio.I", "Polio.II", "Polio.III")) %>%
+  na.omit() %>%
+  droplevels() %>%
+  split(.$Measure) %>%
+  purrr::map(., function(.x) {
+    
+    #.x <- IPV_antigens_plot$Polio.I
+    
+    pvals.tmp <- pvals %>%
+      dplyr::filter(Measure == as.character(unique(.x$Measure)))
+    
+    plot.tmp <-  .x %>%
+      ggplot(aes(x = Timepoint, y = 10^value)) +
+      geom_violin(width = 1, aes(col = cohort)) +
+      geom_line(aes(group = Subject), size = 0.3, alpha = 0.25) +
+      geom_point(size = 0.5, shape = 21) +
+      scale_y_continuous(trans = "log10") + # Requires log transform
+      theme_bw() +
+      labs(x = "", y = "IgG (IU/ml)", title = unique(.x$Measure)) +
+      scale_x_discrete(labels = c("Day 0", "Day 28")) +
+      theme(axis.title.x = element_blank(),
+            axis.title.y = element_text(size = 6.5),
+            axis.text.x = element_text(angle = 45, size = 6.5, vjust = 1, hjust = 1),
+            axis.text.y = element_text(size = 6.5),
+            plot.title = element_text(size = 5),
+            legend.text = element_text(size = 6.5),
+            legend.title = element_text(size = 6.5),
+            strip.text.x = element_text(size = 6.5))+
+      stat_pvalue_manual(data = pvals.tmp, label = "stars", tip.length = 0, size = 9 / (14/5))
+    return(plot.tmp)
+    
+  })
+IPV_antigens_plot
+```
+
+
+```{r Figure S6, echo = FALSE, message = FALSE, warning  = FALSE, eval = TRUE}
+FigureS6 <- cbind(antibodyRAW, antibodyLFC[,7:8]) %>%
+  pivot_longer(cols = c("LFC.D28", "LFC.Y1"), names_to = "Timepoint") %>%
+  dplyr::select(-D28, -Y1) %>%
+  na.omit() %>%
+  mutate(split = interaction(Measure, cohort, Timepoint)) %>%
+  mutate(Timepoint2 = case_when(Timepoint == "LFC.D28" ~ "Day 28",
+                                TRUE ~ "Year 1")) %>%
+  droplevels() %>%
+  
+  split(.$split) %>%
+  purrr::map(., function(x) {
+    #x <- baseline_plots $PT.NL.LFC.T4
+    
+    title <- paste0(unique(x$cohort), "_", unique(x$Timepoint2), "_", unique(x$Measure))
+    
+    plot.tmp <- x %>%
+      ggplot(aes(x = 10^D0, y = value)) +
+      stat_cor(method = "spearman", size = 6.5 * 5/14) +
+      geom_smooth(method = "lm", se = F) +
+      geom_point(shape = 21, fill= "grey") +
+      theme_bw() +
+      theme(axis.text.x = element_text(size = 6.5),
+            axis.text.y = element_text(size = 6.5),
+            legend.text = element_text(size = 6.5),
+            legend.title = element_text(size = 6.5),
+            strip.text = element_text(size = 6.5),
+            title = element_text(size = 6.5),
+            strip.text.y.right = element_text(angle = 0, hjust = 0),
+            legend.key.height = unit(0.4, "cm"),
+            legend.key.width = unit(0.2, "cm"),
+            strip.background = element_rect(colour="white", fill="white"),
+            panel.grid = element_blank(), 
+            legend.position = "bottom")+
+      scale_x_continuous(trans = "log10") +
+      labs(x = "Log10 Day 0 Ab conc.", y = "Log10 fold change", fill = "", title = title) +
+      guides(colour = "none") 
+  })
+FigureS6
+
+```
+
+```{r RNAseq setup, echo = FALSE, message = FALSE, warning  = FALSE, eval = TRUE}
+### Set up
+
+# Retrieve annotation for mapping gene names
+# ensembl = useEnsembl("ensembl", dataset= "hsapiens_gene_ensembl", mirror = "uswest") # Grab the biomart annotation.
+# anno <- getBM(attributes=c('ensembl_gene_id', 'entrezgene_id', "external_gene_name", "hgnc_id", "hgnc_symbol", "external_synonym", "gene_biotype"), 
+#               mart = ensembl) %>%
+#   mutate(hgnc_symbol = case_when(hgnc_symbol == "" ~ ensembl_gene_id, # IDs without a gene name
+#                                  TRUE ~ hgnc_symbol))
+anno <- readRDS("/Users/jgillard/Desktop/BERT study/BERT_analysis/20210312_ensembl_annotation.rds") # Annotation retrieved on 20210312
+
+tmodBTMs <- readRDS("/Users/jgillard/Desktop/GSEAtmodDataV.0.40.rds") # Blood transcription modules extracted from tmod
+wpid2gene <- tmodBTMs$wpid2gene
+wpid2name <- tmodBTMs$wpid2name
+pathway.annotate <- tmodBTMs$pathway.annotate
+group_levels <- c("Interferon/viral sensing", "Monocytes", "DC activation", "Inflammatory/TLR/Chemokines", "Antigen presentation",
+                  "B cells", "T cells","NK cells", "Neutrophils", "Migration","Cell cycle","Signal Transduction","Undefined")
+RNAseq_coldata <- readRDS("/Users/jgillard/Desktop/RNAseq_coldata.rds")
+
+
+
+
+```
+
+
+
+```{r NL cohort gene scores and DGE, echo = FALSE, message = FALSE, warning  = FALSE, eval = TRUE}
+
+# NL Gene scores
+cts.NL <- read.csv("/Users/jgillard/Desktop/BERT study/BERT_analysis/exported data for manuscript/GSE195625_raw_gene_counts.csv", header = TRUE) %>%
+  select(-1)
+colnames(cts.NL) <- str_remove(colnames(cts.NL), pattern = "X")
+cts.NL <- cts.NL %>%
+  mutate(ensembl_gene = str_split(Geneid, pattern = "[.]", simplify=T)[,1]) %>% # Strip off the version numbers for use with Biomart https://www.biostars.org/p/302441/
+  mutate(gene_name = mapvalues(ensembl_gene, from = anno$ensembl_gene_id, to = anno$hgnc_symbol)) %>% 
+  dplyr::select(-Geneid, -ensembl_gene) %>% 
+  dplyr::group_by(gene_name) %>% # Sum the counts from duplicated gene names
+  dplyr::summarize_all(sum) %>%
+  melt(., id.vars = "gene_name") %>%
+  dplyr::filter(variable %out% c(95, 102)) %>% # Exclude low-quality RNAseq sample of Participant BK038 and corresponding baseline
+  dcast(gene_name ~ variable, value.var = "value") %>%
+  column_to_rownames("gene_name")
+colnames(cts.NL) <- mapvalues(colnames(cts.NL), from = RNAseq_coldata$coldata_nl$sample_number, to = RNAseq_coldata$coldata_nl$sample)
+gene.scores.NL <- edgeR::cpm(cts.NL,log =T) %>% # Raw count data -> log2(CPM)
+  data.frame() %>%
+  rownames_to_column("gene") %>%
+  melt(., variable.name = "sample", id.vars = "gene") %>%
+  mutate(Subject = str_split(sample, pattern = "\\.", simplify = T)[,1],
+         Time = str_split(sample, pattern = "\\.", simplify = T)[,2]) %>%
+  dcast(gene + Subject ~ Time, value.var = "value") %>%
+  mutate(LFC = D1 - D0) # Get log2 fold change per gene, per individual
+
+
+condition.NL <- DataFrame(sample = colnames(cts.NL)) %>% # In order to have the metadata arranged in the same order as the counts data for deseq2
+  data.frame() %>%
+  mutate(Subject = str_split(sample, pattern = "\\.", simplify = T)[,1],
+         Time = str_split(sample, pattern = "\\.", simplify = T)[,2]) %>%
+  mutate(Time = factor(Time, levels = c("D0", "D1")))
+
+dds.NL <- DESeqDataSetFromMatrix(cts.NL, condition.NL, 
+                              design = ~ Subject + Time)
+# Run Differential expression analysis
+model <- model.matrix(~ Subject + Time, condition.NL)
+dds.NL <- DESeq(dds.NL, full = model, betaPrior = FALSE)
+#resultsNames(dds)
+
+results.NL <- results(dds.NL, name = "TimeD1") %>%
+  data.frame() %>%
+  rownames_to_column("gene") %>%
+  arrange(dplyr::desc(log2FoldChange))%>%
+  mutate(cohort = "NL")
+
+
+
+```
+
+
+```{r UK cohort gene scores and DGE, echo = FALSE, message = FALSE, warning  = FALSE, eval = TRUE}
+# Ox gene scores
+cts.UK <- read.csv("/Users/jgillard/Desktop/BERT study/BERT_analysis/exported data for manuscript/GSE233855_Oxford_raw_gene_counts.csv") %>%
+  mutate(ensembl_gene = str_split(Geneid, pattern = "[.]", simplify=T)[,1]) %>% # Strip off the version numbers for use with Biomart https://www.biostars.org/p/302441/
+  mutate(gene_name = mapvalues(ensembl_gene, from = anno$ensembl_gene_id, to = anno$hgnc_symbol)) %>% # Not all genes are perfectly mapped to a HGNC symbol
+  dplyr::select(-Geneid, -ensembl_gene) %>% 
+  dplyr::group_by(gene_name) %>% # Sum the counts from duplicated gene names
+  dplyr::summarize_all(sum) %>%
+  melt(., id.vars = "gene_name") %>%
+  mutate(Sample = str_split(variable, pattern = "_", simplify = T)[,2]) %>%
+  dcast(gene_name ~ Sample, value.var = "value") %>%
+  mutate(gene_biotype = mapvalues(gene_name, from = anno$hgnc_symbol, to = anno$gene_biotype)) %>%
+  dplyr::filter(gene_biotype %in% c("protein_coding")) %>%
+  dplyr::select(-gene_biotype) %>%
+  column_to_rownames("gene_name")
+colnames(cts.UK) <- mapvalues(colnames(cts.UK), from = RNAseq_coldata$coldata_ox$sample_number, to = RNAseq_coldata$coldata_ox$sample)
+gene.scores.UK <- edgeR::cpm(cts.UK,log =T) %>%
+  data.frame() %>%
+  rownames_to_column("gene") %>%
+  melt(., variable.name = "sample", id.vars = "gene") %>%
+  mutate(Subject = str_split(sample, pattern = "\\.", simplify = T)[,1],
+         Time = str_split(sample, pattern = "\\.", simplify = T)[,2]) %>%
+  dcast(gene + Subject ~ Time, value.var = "value") %>%
+  mutate(LFC = D1 - D0) %>% # Get log2 fold change per gene, per individual
+  na.omit()
+
+
+condition.UK <- DataFrame(sample = colnames(cts.UK)) %>% # In order to have the metadata arranged in the same order as the counts data for deseq2
+  data.frame() %>%
+  mutate(Subject = str_split(sample, pattern = "\\.", simplify = T)[,1],
+         Time = str_split(sample, pattern = "\\.", simplify = T)[,2]) %>%
+  mutate(Time = factor(Time, levels = c("D0", "D1")))
+
+dds.UK <- DESeqDataSetFromMatrix(cts.UK, condition.UK, 
+                              design = ~ Subject + Time)
+# Run Differential expression analysis
+model <- model.matrix(~ Subject + Time, condition.UK)
+dds.UK <- DESeq(dds.UK, full = model, betaPrior = FALSE)
+results.UK <- results(dds.UK, name = "TimeD1") %>%
+  data.frame() %>%
+  rownames_to_column("gene") %>%
+  arrange(dplyr::desc(log2FoldChange)) %>%
+  mutate(cohort = "UK")
+
+
+```
+
+
+```{r Tdap DEG, echo = FALSE, message = FALSE, warning  = FALSE, eval = TRUE}
+#https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE152683  details on the data and sample labels
+#https://github.com/JasonPBennett/Pertussis_2020/blob/main/Pertussis_analysis_rnaseq.ipynb details on analysis incluidng low quality RNAseq samples
+cts.tdap <- read.table(file = '/Users/jgillard/Desktop/BERT study/BERT_analysis/scRNAseq/Other data/GSE152683_ALL_HtSeq_counts.tsv', sep = '\t', header = TRUE) %>% # Raw HTSeq Counts, the authors TPM normalized afterwards. Generated from PBMCs
+  data.frame() %>%
+  
+  # Prepare counts for downstream analysis
+  mutate(gene = str_split(gene_name, pattern = "\\.", simplify = T)[,1]) %>%
+  mutate(gene_name = mapvalues(gene, from = anno$ensembl_gene_id, to = anno$hgnc_symbol)) %>% # Annotate genes
+  mutate(biotype = mapvalues(gene, from = anno$ensembl_gene_id, to = anno$gene_biotype)) %>%
+  dplyr::filter(biotype == "protein_coding") %>% # analyze only protein coding genes
+  dplyr::select(-biotype, -gene) %>%
+  dplyr::group_by(gene_name) %>% # Sum the counts from duplicated gene names
+  dplyr::summarize_all(sum) %>%
+  column_to_rownames("gene_name") %>%
+  data.frame() %>%
+  rownames_to_column("gene") %>%
+  
+  # Annotate and filter samples
+  melt(id.vars = "gene") %>%
+  mutate(Timepoint = str_split(variable, pattern = "_", simplify = T)[,4]) %>%
+  mutate(SubjectID = str_split(variable, pattern = "_", simplify = T)[,2]) %>%
+  dplyr::filter(SubjectID %out% c("2890", "2922", "2887", "2689")) %>% # Low quality samples identified in the original JCI manuscript
+  mutate(Timepoint = case_when(Timepoint == "TimePoint1" ~ "D0", # Map timepoints
+                               Timepoint == "TimePoint2" ~ "D1",
+                               Timepoint == "TimePoint3" ~ "D3",
+                               Timepoint == "TimePoint4" ~ "D7",
+                               Timepoint == "TimePoint5" ~ "D14")) %>%
+  #dplyr::filter(Timepoint %in% c("D0", "D1", "D3")) %>%
+  dplyr::filter(Timepoint %in% c("D0", "D1")) %>%
+  dplyr::select(-variable)
+
+# Prepare for Deseq2
+cts.tdap <- cts.tdap %>%
+  mutate(sample = interaction(SubjectID, Timepoint)) %>%
+  dcast(gene ~ sample, value.var = "value") %>%
+  column_to_rownames("gene") %>%
+  as.matrix
+
+condition.tdap <- DataFrame(sample = colnames(cts.tdap)) %>% # In order to have the metadata arranged in the same order as the counts data for deseq2
+  data.frame() %>%
+  mutate(Subject = str_split(sample, pattern = "\\.", simplify = T)[,1],
+         Time = str_split(sample, pattern = "\\.", simplify = T)[,2]) %>%
+  mutate(Time = factor(Time, levels = c("D0", "D1", "D3")))
+
+dds.tdap <- DESeqDataSetFromMatrix(cts.tdap, condition.tdap, 
+                                    design = ~ Subject + Time)
+
+#DE
+model <- model.matrix(~ Subject + Time, condition.tdap)
+all.zero <- apply(model, 2, function(x) all(x == 0)) # Displays TRUE for column of 0's.
+idx <- which(all.zero)
+model <- model[,-idx]
+
+dds.tdap <- DESeq(dds.tdap, full = model, betaPrior = FALSE)
+
+
+results.tdap <- results(dds.tdap, name = "TimeD1") %>%
+  data.frame() %>%
+  rownames_to_column("gene") %>%
+  arrange(dplyr::desc(log2FoldChange))%>%
+  mutate(cohort = "tdap")
+```
+
+```{r D1 vs D0 GSEA , echo = FALSE, message = FALSE, warning  = FALSE, eval = TRUE}
+
+gene_universe <- intersect(results.UK$gene, results.NL$gene)
+gene_universe <- intersect(gene_universe, results.tdap$gene)
+
+
+set.seed(1)
+gsea.result <- list()
+for (i in list(results.UK, results.NL,  results.tdap)) {
+  df.tmp <- i %>%
+    dplyr::filter(gene %in% gene_universe)
+  cohort <- unique(df.tmp$cohort)
+  geneList <- df.tmp$log2FoldChange
+  names(geneList) <- df.tmp$gene
+  geneList <- na.omit(geneList) 
+  
+  res.tmp <- GSEA(geneList, TERM2GENE = wpid2gene, TERM2NAME = wpid2name, verbose=FALSE, pvalueCutoff = 1, seed = TRUE, nPerm = 10000)
+  gsea.result[[cohort]] <- res.tmp@result
+}
+gsea.result <- bind_rows(gsea.result, .id = "cohort")
+
+multicohort.gsea.main <- gsea.result %>%
+  mutate(ID = str_remove(ID, pattern = "LI.")) %>%
+  dplyr::filter(p.adjust < 0.05) %>%
+  mutate(cohort = factor(cohort, levels = c("NL", "UK", "tdap"))) %>%
+  mutate(group = mapvalues(ID, from = pathway.annotate$ID, to = as.character(pathway.annotate$`Manuscript label`))) %>%
+  dplyr::filter(group %in% c("Monocytes", "Interferon/viral sensing", "Inflammatory/TLR/Chemokines", "DC activation", "Antigen presentation", 
+                             "T cells", "B cells")) %>%
+  dplyr::select(ID, Description, NES, group, cohort) %>% 
+  arrange(NES) %>%
+  mutate(Description = paste0(ID, "_", Description)) %>%
+  mutate(Description = factor(Description, levels = unique(.$Description))) %>%
+  mutate(group = factor(group, levels  = group_levels)) %>%
+  ggplot(aes(x = Description, y = NES)) +
+  geom_bar(stat='identity', width=0.5, position = "dodge") +
+  coord_flip() +
+  labs(x = "") +
+  theme_classic() +
+  guides(fill = guide_legend(ncol=1,byrow=TRUE)) +
+  theme(axis.title.x = element_text(size = 6.5),
+        axis.title.y = element_text(size = 6.5),
+        axis.text.x = element_text(size = 6.5),
+        axis.text.y = element_text(size = 5),
+        plot.title = element_text(size = 6.5),
+        legend.text = element_text(size = 6.5),
+        legend.title = element_text(size = 6.5),
+        strip.text.x = element_text(size = 6.5),
+        strip.text.y = element_text(size = 6.5, angle = 0),
+        strip.background = element_blank(),
+        legend.key.width = unit(0.2, "cm"),
+        legend.key.height = unit(0.2, "cm"),
+        legend.position = "right",
+        panel.grid = element_blank()) +
+  labs(y = "NES (Day 1 vs Day0)", x = "") +
+  facet_rep_grid(group~ cohort, scales = "free_y", space = "free", repeat.tick.labels = FALSE)
+multicohort.gsea.main
+
+```
+
+
+
+
+
+```{r Figure 3, echo = FALSE, message = FALSE, warning  = FALSE, eval = TRUE}
+# Calculate Adjusted LFC response per cohort
+Antibody.responses.GSEA <- cbind(antibodyRAW, antibodyLFC[,7:8]) %>%
+ 
+  mutate(LFC.Y1 = case_when(Measure %like% "Polio"~ 1,
+                            TRUE ~ LFC.Y1)) %>%
+  mutate(variable = interaction(Measure, cohort)) %>%
+  droplevels() %>%
+  split(.$variable) %>%
+  purrr::map(., safely(function(x) {
+    
+    mod.D28 <- lm(LFC.D28 ~ D0, data = x)
+    mod.Y1 <- lm(LFC.Y1 ~ D0, data = x)
+    
+    x <- x %>%
+      mutate(Adj.D28 = residuals(mod.D28) + mod.D28$coefficients[1], # Residuals plus intercept to calculate adjusted LFC
+             Adj.Y1 = residuals(mod.Y1) + mod.Y1$coefficients[1])
+    
+    return(x)
+  }))
+Antibody.responses.GSEA <- na.omit(transpose(Antibody.responses.GSEA)$result) %>%
+  bind_rows() %>%
+  mutate(LFC.Y1 = case_when(Measure %like% "Polio"~ NA_real_,
+                            TRUE ~ LFC.Y1)) %>%
+  mutate(Adj.Y1 = case_when(Measure %like% "Polio"~ NA_real_,
+                            TRUE ~ Adj.Y1))
+
+
+NL_responses <- Antibody.responses.GSEA %>%
+  dplyr::filter(cohort == "NL") %>%
+  dplyr::select(Subject, Measure, LFC.D28, LFC.Y1, Adj.D28, Adj.Y1) %>%
+  pivot_longer(cols = c(3:6)) %>%
+  mutate(Measure = str_replace(Measure, pattern = "\\.", replacement = "_")) %>%
+  mutate(name = interaction(Measure, name)) %>%
+  dplyr::filter(Subject != "BK038") %>%
+  dplyr::filter(Measure %out% c("Polio_I", "Polio_II", "Polio_III")) %>%
+  pivot_wider(names_from = name, values_from = value, id_cols = Subject)
+
+UK_responses <- Antibody.responses.GSEA %>%
+  dplyr::filter(cohort == "UK") %>%
+  dplyr::select(Subject, Measure, LFC.D28, LFC.Y1, Adj.D28, Adj.Y1) %>%
+  pivot_longer(cols = c(3:6)) %>%
+  mutate(name = interaction(Measure, name)) %>%
+  dplyr::filter(Subject != "DK042") %>% # missing post-vax RNAseq blood sample
+  droplevels() %>%
+  pivot_wider(names_from = name, values_from = value, id_cols = Subject)
+
+LFCs.gsea <- rbind(NL_responses %>%
+                     mutate(cohort = "NL"), UK_responses %>%
+                     mutate(cohort = "UK"))
+
+# Scale antibody values per antigen, per cohort for the combined analysis
+LFCs.gsea <- LFCs.gsea %>% 
+  melt(., id.vars = c("Subject", "cohort")) %>%
+  mutate(splitter = interaction(cohort, variable)) %>%
+  split(.$splitter) %>%
+  purrr::map(., function(x) {
+    x$value <- scale(x$value)
+    return(x)
+  }) %>%
+  bind_rows() %>%
+  dcast(Subject ~ variable, value.var = "value")
+
+# Scale gene scores for combined analysis
+gene.scores.NL <- gene.scores.NL %>%
+  dplyr::filter(gene %in% gene_universe) %>%
+  
+  split(.$gene) %>%
+  purrr::map(., function(x) {
+    x$LFC <- scale(x$LFC) 
+    return(x)
+  }) %>%
+  bind_rows() %>%
+  select(-D0, -D1)
+
+gene.scores.UK <- gene.scores.UK %>%
+  dplyr::filter(gene %in% gene_universe) %>%
+  
+  split(.$gene) %>%
+  purrr::map(., function(x) {
+    x$LFC <- scale(x$LFC)
+    return(x)
+  }) %>%
+  bind_rows() %>%
+  select(-D0, -D1)
+
+
+gene.scores <- rbind(gene.scores.NL, gene.scores.UK) 
+gene.scores.gsea <- gene.scores %>%
+  dcast(Subject ~ gene, value.var = "LFC")
+
+
+set.seed(5) 
+res <- list()
+for(i in 2:length(LFCs.gsea)) {
+  response <- colnames(LFCs.gsea)[i]
+  print(response)
+  
+  antibody <- LFCs.gsea[,c(1, i)]
+  tmp <- gene.scores.gsea %>%
+    melt(., id.vars = "Subject") %>%
+    full_join(., antibody, by = "Subject") %>%
+    split(.$variable) %>%
+    purrr::map(., function(.x) {
+      
+      coef <- cor(.x[,3], .x[,4], use = "pairwise.complete.obs", method = "pearson")
+      p.value <- cor.test(.x[,3], .x[,4], use = "pairwise.complete.obs", method = "pearson", alternative = "two.sided")$p.value
+      result <- data.frame(coef = coef, p.value = p.value)
+      
+      return(result)
+    }) %>%
+    bind_rows(.id = "gene") %>%
+    arrange(desc(coef)) %>%
+    mutate(response = response)
+  
+  geneList <- tmp$coef
+  names(geneList) <- tmp$gene
+  
+  
+  gsea.result <- GSEA(geneList, TERM2GENE = wpid2gene, TERM2NAME = wpid2name, verbose=FALSE, pvalueCutoff = 1, nPerm = 10000) #nperm matters a lot
+  gsea.result.frame <- gsea.result@result %>%
+    mutate(response = response)
+  
+  res[[i]] <- gsea.result.frame
+}
+res_shared <- do.call("rbind", res) %>%
+  dplyr::select(1:3, 5, 6, 7, 11, 12) %>%
+  mutate(cohort = "shared")
+
+
+
+
+biomarkers.frame <- res_shared %>%
+  mutate(Time = str_split(response, pattern = "\\.", simplify = TRUE)[,3],
+         adjusted = str_split(response, pattern = "\\.", simplify = TRUE)[,2],
+         response = str_split(response, pattern = "\\.", simplify = TRUE)[,1]) %>%
+  
+  mutate(ID = str_remove(ID, pattern = "LI.")) %>%
+  mutate(FDR = case_when(p.adjust > 0.05 ~ " ",
+                         TRUE ~ "< 0.05")) %>%
+  mutate(FDR = factor(FDR, levels = c("< 0.05",  " "))) %>%
+  mutate(NES = case_when(pvalue > 0.05 ~ NA_real_,
+                         TRUE ~ NES)) %>%
+  mutate(logPs = -log10(pvalue)) %>%
+  mutate(group = mapvalues(ID, from = pathway.annotate$ID, to = as.character(pathway.annotate$`Manuscript label`))) %>%
+  
+  mutate(Description = paste0(ID, "_", Description)) %>%
+  mutate(Description = factor(Description, levels = unique(.$Description))) %>%
+  mutate(ID = factor(ID, levels = unique(.$ID))) %>%
+  mutate(response = factor(response, levels = c("FHA", "Prn", "PT",  "TT", "Dt"))) %>%
+  mutate(Time = case_when(Time == "D28" ~ "Day 28",
+                          TRUE ~ "Year 1")) %>%
+  mutate(view = interaction(cohort, Time)) %>%
+  mutate(view = factor(view, levels = c("shared.Day 28", "shared.Year 1"))) %>%
+  mutate(group = factor(group, levels  = group_levels))
+
+
+combined_biomarkers <- biomarkers.frame %>%
+  dplyr::filter(adjusted == "Adj")
+
+sig.cors.Adj <- combined_biomarkers %>% # Filter only significant correlations
+  mutate(filtered = case_when(p.adjust <= 0.05 ~ 1,
+                              TRUE ~ 0)) %>%
+  dcast(ID + Description ~ response + view, value.var = "filtered") %>%
+  rowwise() %>%
+  mutate(sums = sum(c_across(3:length(.)))) %>%
+  ungroup() %>% data.frame() %>%
+  dplyr::filter(sums > 2) # Only show BTMs with at least 3 correlations across antigen:timepoints
+combined.cors <- sig.cors.Adj 
+combined_biomarkers <- combined_biomarkers %>%
+  dplyr::filter(ID %in% sig.cors.Adj$ID) %>%
+  ggplot(aes(x = response, y = Description)) +
+  geom_tile(aes(width=.9, height=.9), size = 0.5, fill = "white") +
+  geom_point(aes(size = logPs, fill = NES,  colour = FDR), shape = 21) + # size = size for manual size scaling
+  scale_fill_gradient2(low="#2C7BB6", mid="white", high="#D7191C", midpoint  = 0, na.value = 'grey') +
+  labs(y=NULL, x=NULL) +
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = -90, hjust = 0, vjust = 0.5, size = 6.5),
+        axis.text.y = element_text(size = 6.5),
+        legend.text = element_text(size = 6.5),
+        legend.title = element_text(size = 6.5),
+        strip.text = element_text(size = 6.5),
+        title = element_text(size = 6.5),
+        strip.text.y.right = element_text(angle = 0, hjust = 0),
+        legend.key.height = unit(0.4, "cm"),
+        legend.key.width = unit(0.2, "cm"),
+        strip.background = element_rect(colour="white", fill="white"),
+        panel.grid = element_blank()) +
+  
+  facet_grid(group~view, scales = "free", space = "free") +
+  scale_colour_manual(values = c("#000000", "white")) +
+  scale_size_area(max_size = 2.5, breaks = c(1.30, 2, 4), labels =  c(1.30, 2, 4), limits = c(1.30, 4))
+combined_biomarkers
+
+
+```
+
+
+```{r Figure 5C, echo = FALSE, message = FALSE, warning  = FALSE, eval = TRUE}
+
+
+ids <- multicohort.gsea.main$data %>% # NL cohort BTMs
+  dplyr::filter(cohort == "NL") %>%
+  mutate(ID = paste0("LI.", ID)) %>%
+  select(ID) %>%
+  unlist()
+
+mofa.degs <- read.xlsx("/Users/jgillard/Desktop/Source_data.xlsx", sheet = 6)
+BTMs.scRNA <- cbind(tmodBTMs$wpid2gene, pathway = tmodBTMs$wpid2name[,2]) %>% # For given BTMs, compare gene expression scRNA and bulk
+  dplyr::filter(wpid %in% ids) %>% # Pathways that are mono/DC, antiviral, etc
+  left_join(., mofa.degs %>%
+              dplyr::rename(scRNA.LFC = log2FoldChange) %>%
+              dplyr::select(gene, scRNA.LFC, mofa_cluster), by = "gene") %>%
+  left_join(., results.NL %>%
+              dplyr::rename(bulk.LFC = log2FoldChange) %>%
+              dplyr::select(gene, bulk.LFC), by = "gene") %>%
+  na.omit() %>%
+  mutate(wpid = str_remove(wpid, pattern = "LI.")) %>%
+  mutate(pathway = paste0(wpid, "_", pathway)) %>%
+  mutate(group = paste0(wpid, "_", mofa_cluster)) %>%
+  split(.$group) %>%
+  purrr::map(., function(.x) {
+    pathway <- unique(.x$pathway)
+    subpopulation = unique(.x$mofa_cluster)
+    
+    
+    coef <- cor(.x$scRNA.LFC, .x$bulk.LFC, use = "pairwise.complete.obs", method = "pearson")
+    p.value <- cor.test(.x$scRNA.LFC, .x$bulk.LFC, use = "pairwise.complete.obs", method = "pearson", alternative = "two.sided")$p.value
+    result <- data.frame(coef = coef, p.value = p.value, pathway = pathway, subpopulation = subpopulation)
+    
+    return(result)
+   
+    
+    
+  }
+  
+  ) %>%
+  bind_rows() %>%
+  mutate(stars = cut(p.value, breaks=c(-Inf, 0.001, 0.01, 0.05, Inf), label=c("***", "**", "*", ""))) %>%
+  dplyr::filter(subpopulation != "Classical DC1") %>%
+  mutate(ID = str_split(pathway, pattern = "_", simplify = T)[,1]) %>%
+  mutate(group2 = mapvalues(ID, from = pathway.annotate$ID, to = as.character(pathway.annotate$`Manuscript label`))) %>%
+  mutate(group2 = factor(group2, levels  = group_levels)) %>%
+  dplyr::filter(group2 %in% c("Monocytes", "Interferon/viral sensing", "Inflammatory/TLR/Chemokines", "DC activation", "Antigen presentation")) %>%
+  ggplot(aes(y = pathway, x = subpopulation, fill = coef)) +
+  geom_tile(colour = "grey") +
+  geom_text(aes(label=stars), color="black", size=6.5 * 5 / 14) +
+  scale_fill_gradient2(low="#2C7BB6", mid="white", high="#D7191C", midpoint  = 0, na.value = 'grey', limits = c(-1, 1)) + #set to 1 and -1
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 6.5, angle = 90, hjust = 1, vjust = 0.5),
+        axis.text.y = element_text(size = 6.5),
+        legend.text = element_text(size = 6.5),
+        legend.title = element_text(size = 6.5),
+        strip.text = element_text(size = 6.5),
+        plot.title = element_text(size = 6.5),
+        plot.subtitle = element_text(size = 6.5),
+        strip.text.y.right = element_text(angle = 0, hjust = 0),
+        legend.key.width = unit(0.5, "cm"),
+        legend.key.height = unit(0.2, "cm"),
+        legend.position = "top", 
+        strip.background = element_rect(colour="white", fill="white")) +
+  facet_grid(group2~., space = "free", scales = "free_y") +
+  labs(x = "", y = "", fill = "correlation")
+
+
+
+
+```
+
+
+```{r Figure 7B, echo = FALSE, message = FALSE, warning  = FALSE, eval = TRUE}
+
+cts.combined <- cbind(cts.NL[which(rownames(cts.NL) %in% gene_universe),], cts.UK[which(rownames(cts.UK) %in% gene_universe),])
+condition.combined <- DataFrame(sample = colnames(cts.combined)) %>% # In order to have the metadata arranged in the same order as the counts data for deseq2
+  data.frame() %>%
+  mutate(Subject = str_split(sample, pattern = "\\.", simplify = T)[,1],
+         Time = str_split(sample, pattern = "\\.", simplify = T)[,2]) %>%
+  mutate(Time = factor(Time, levels = c("D0", "D1")))
+dds.combined <- DESeqDataSetFromMatrix(cts.combined, condition.combined,
+                                       design = ~ Subject + Time)
+
+model <- model.matrix(~ Subject + Time, data = condition.combined) 
+all.zero <- apply(model, 2, function(x) all(x == 0)) # Displays TRUE for column of 0's.
+dds.combined <- DESeq(dds.combined, full = model, betaPrior = FALSE)
+
+
+
+
+results.combined <- results(dds.combined, name = "TimeD1") %>%
+  data.frame() %>%
+  rownames_to_column("gene") %>%
+  arrange(desc(log2FoldChange)) %>%
+  mutate(cohort = "tdapipv")
+tdapipv.tdap <- rbind(results.combined, results.tdap) %>%
+  dplyr::select(gene, log2FoldChange, cohort) %>%
+  dplyr::filter(gene %in% gene_universe) %>%
+  dcast(gene ~ cohort, value.var = "log2FoldChange") %>%
+  mutate(diff = tdapipv - tdap) %>%
+  arrange(dplyr::desc(diff)) %>%
+  mutate(contrast = "tdapipv.tdap")
+
+geneList <- tdapipv.tdap$diff
+names(geneList) <- tdapipv.tdap$gene
+geneList <- na.omit(geneList) 
+res.tmp <- GSEA(geneList, TERM2GENE = wpid2gene, TERM2NAME = wpid2name, verbose=FALSE, pvalueCutoff = 1, seed = TRUE, nPerm = 10000)
+
+
+Figure7B <- res.tmp@result %>%
+  dplyr::filter(p.adjust < 0.05) %>%
+  mutate(ID = str_remove(ID, pattern = "LI.")) %>%
+  mutate(group = mapvalues(ID, from = pathway.annotate$ID, to = as.character(pathway.annotate$`Manuscript label`))) %>%
+  dplyr::select(ID, Description, NES, group) %>% 
+  arrange(NES) %>%
+  mutate(Description = paste0(ID, "_", Description)) %>%
+  mutate(Description = factor(Description, levels = unique(.$Description))) %>%
+  ggplot(aes(x = Description, y = NES)) +
+  geom_bar(stat='identity', width=0.5, aes(fill = NES), position = "dodge") +
+  coord_flip() +
+  labs(x = "") +
+  theme_classic() +
+  theme(axis.title.x = element_text(size = 6.5),
+        axis.title.y = element_text(size = 6.5),
+        axis.text.x = element_text(size = 6.5),
+        axis.text.y = element_text(size = 5.5),
+        plot.title = element_text(size = 6.5),
+        legend.text = element_text(size = 6.5),
+        legend.title = element_text(size = 6.5),
+        strip.text.x = element_text(size = 6.5),
+        strip.text.y = element_text(size = 6.5, angle = 0),
+        strip.background = element_blank(),
+        legend.key.width = unit(0.5, "cm"),
+        legend.key.height = unit(0.2, "cm"),
+        panel.grid = element_blank(),
+        legend.position = "bottom") +
+  scale_fill_gradient2(low="#2C7BB6", mid="white", high="#D7191C", midpoint  = 0, na.value = 'grey') +
+  labs(y = "NES D1-D0 (Tdap.IPV - Tdap)")
+Figure7B
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
