@@ -104,7 +104,8 @@ Figure1C
 
 
 ```{r Figure S1, echo = FALSE, message = FALSE, warning  = FALSE, eval = TRUE}
-antibodyRAW <- read.xlsx("/Users/jgillard/Desktop/Source_data.xlsx", sheet = 3)
+antibodyRAW <- read.xlsx("/Users/jgillard/Desktop/Source_data.xlsx", sheet = 3) %>%
+  select(-c(10:15))
 
 pvals <-  antibodyRAW %>%
   pivot_longer(cols = c("D0", "D28", "Y1"), names_to = "Timepoint") %>%
@@ -264,15 +265,15 @@ FigureS6
 #               mart = ensembl) %>%
 #   mutate(hgnc_symbol = case_when(hgnc_symbol == "" ~ ensembl_gene_id, # IDs without a gene name
 #                                  TRUE ~ hgnc_symbol))
-anno <- readRDS("/Users/jgillard/Desktop/BERT study/BERT_analysis/20210312_ensembl_annotation.rds") # Annotation retrieved on 20210312
+anno <- readRDS("/Users/jgillard/Desktop/Life/Github repository/Tdap_SystemsImmunology/20210312_ensembl_annotation.rds") # Annotation retrieved on 20210312
 
-tmodBTMs <- readRDS("/Users/jgillard/Desktop/GSEAtmodDataV.0.40.rds") # Blood transcription modules extracted from tmod
+tmodBTMs <- readRDS("/Users/jgillard/Desktop/Life/Github repository/Tdap_SystemsImmunology/GSEAtmodDataV.0.40.rds") # Blood transcription modules extracted from tmod
 wpid2gene <- tmodBTMs$wpid2gene
 wpid2name <- tmodBTMs$wpid2name
 pathway.annotate <- tmodBTMs$pathway.annotate
 group_levels <- c("Interferon/viral sensing", "Monocytes", "DC activation", "Inflammatory/TLR/Chemokines", "Antigen presentation",
                   "B cells", "T cells","NK cells", "Neutrophils", "Migration","Cell cycle","Signal Transduction","Undefined")
-RNAseq_coldata <- readRDS("/Users/jgillard/Desktop/RNAseq_coldata.rds")
+RNAseq_coldata <- readRDS("/Users/jgillard/Desktop/Life/Github repository/Tdap_SystemsImmunology/RNAseq_coldata.rds")
 
 
 
@@ -284,7 +285,7 @@ RNAseq_coldata <- readRDS("/Users/jgillard/Desktop/RNAseq_coldata.rds")
 ```{r NL cohort gene scores and DGE, echo = FALSE, message = FALSE, warning  = FALSE, eval = TRUE}
 
 # NL Gene scores
-cts.NL <- read.csv("/Users/jgillard/Desktop/BERT study/BERT_analysis/exported data for manuscript/GSE195625_raw_gene_counts.csv", header = TRUE) %>%
+cts.NL <- read.csv("/Users/jgillard/Desktop/GSE195625_raw_gene_counts.csv", header = TRUE) %>%
   select(-1)
 colnames(cts.NL) <- str_remove(colnames(cts.NL), pattern = "X")
 cts.NL <- cts.NL %>%
@@ -334,7 +335,7 @@ results.NL <- results(dds.NL, name = "TimeD1") %>%
 
 ```{r UK cohort gene scores and DGE, echo = FALSE, message = FALSE, warning  = FALSE, eval = TRUE}
 # Ox gene scores
-cts.UK <- read.csv("/Users/jgillard/Desktop/BERT study/BERT_analysis/exported data for manuscript/GSE233855_Oxford_raw_gene_counts.csv") %>%
+cts.UK <- read.csv("/Users/jgillard/Desktop/GSE233855_Oxford_raw_gene_counts.csv") %>%
   mutate(ensembl_gene = str_split(Geneid, pattern = "[.]", simplify=T)[,1]) %>% # Strip off the version numbers for use with Biomart https://www.biostars.org/p/302441/
   mutate(gene_name = mapvalues(ensembl_gene, from = anno$ensembl_gene_id, to = anno$hgnc_symbol)) %>% # Not all genes are perfectly mapped to a HGNC symbol
   dplyr::select(-Geneid, -ensembl_gene) %>% 
@@ -383,7 +384,7 @@ results.UK <- results(dds.UK, name = "TimeD1") %>%
 ```{r Tdap DEG, echo = FALSE, message = FALSE, warning  = FALSE, eval = TRUE}
 #https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE152683  details on the data and sample labels
 #https://github.com/JasonPBennett/Pertussis_2020/blob/main/Pertussis_analysis_rnaseq.ipynb details on analysis incluidng low quality RNAseq samples
-cts.tdap <- read.table(file = '/Users/jgillard/Desktop/BERT study/BERT_analysis/scRNAseq/Other data/GSE152683_ALL_HtSeq_counts.tsv', sep = '\t', header = TRUE) %>% # Raw HTSeq Counts, the authors TPM normalized afterwards. Generated from PBMCs
+cts.tdap <- read.table(file = '/Users/jgillard/Desktop/GSE152683_ALL_HtSeq_counts.tsv', sep = '\t', header = TRUE) %>% # Raw HTSeq Counts, the authors TPM normalized afterwards. Generated from PBMCs
   data.frame() %>%
   
   # Prepare counts for downstream analysis
